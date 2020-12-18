@@ -1,4 +1,4 @@
-﻿#include <stdio.h>
+#include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
 #include <unistd.h>
@@ -85,6 +85,8 @@ static retro_audio_sample_t audio_sample_cb;
 static retro_input_poll_t input_poll_cb;
 static retro_input_state_t input_state_cb;
 
+static bool libretro_supports_bitmasks = false;
+
 static unsigned emulated_devices = 1;
 static bool initialized = false;
 static unsigned screen_layout = 0;
@@ -119,24 +121,39 @@ static struct retro_rumble_interface rumble;
 
 static void GB_update_keys_status(GB_gameboy_t *gb, unsigned port)
 {
+    uint16_t joypad_bits = 0;
+
     input_poll_cb();
 
+    if (libretro_supports_bitmasks) {
+        joypad_bits = input_state_cb(port, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_MASK);
+    }
+    else {
+        unsigned j;
+
+        for (j = 0; j < (RETRO_DEVICE_ID_JOYPAD_R3+1); j++) {
+            if (input_state_cb(port, RETRO_DEVICE_JOYPAD, 0, j)) {
+                joypad_bits |= (1 << j);
+            }
+        }
+    }
+
     GB_set_key_state_for_player(gb, GB_KEY_RIGHT,  emulated_devices == 1 ? port : 0,
-        input_state_cb(port, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT));
+        joypad_bits & (1 << RETRO_DEVICE_ID_JOYPAD_RIGHT));
     GB_set_key_state_for_player(gb, GB_KEY_LEFT,   emulated_devices == 1 ? port : 0,
-        input_state_cb(port, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT));
+        joypad_bits & (1 << RETRO_DEVICE_ID_JOYPAD_LEFT));
     GB_set_key_state_for_player(gb, GB_KEY_UP,     emulated_devices == 1 ? port : 0,
-        input_state_cb(port, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP));
+        joypad_bits & (1 << RETRO_DEVICE_ID_JOYPAD_UP));
     GB_set_key_state_for_player(gb, GB_KEY_DOWN,   emulated_devices == 1 ? port : 0,
-        input_state_cb(port, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN));
+        joypad_bits & (1 << RETRO_DEVICE_ID_JOYPAD_DOWN));
     GB_set_key_state_for_player(gb, GB_KEY_A,      emulated_devices == 1 ? port : 0,
-        input_state_cb(port, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A));
+        joypad_bits & (1 << RETRO_DEVICE_ID_JOYPAD_A));
     GB_set_key_state_for_player(gb, GB_KEY_B,      emulated_devices == 1 ? port : 0,
-        input_state_cb(port, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B));
+        joypad_bits & (1 << RETRO_DEVICE_ID_JOYPAD_B));
     GB_set_key_state_for_player(gb, GB_KEY_SELECT, emulated_devices == 1 ? port : 0,
-        input_state_cb(port, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT));
+        joypad_bits & (1 << RETRO_DEVICE_ID_JOYPAD_SELECT));
     GB_set_key_state_for_player(gb, GB_KEY_START,  emulated_devices == 1 ? port : 0,
-        input_state_cb(port, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START));
+        joypad_bits & (1 << RETRO_DEVICE_ID_JOYPAD_START));
 
 }
 
@@ -205,11 +222,11 @@ static retro_environment_t environ_cb;
 
 /* variables for single cart mode */
 static const struct retro_variable vars_single[] = {
-    { "sameboy_color_correction_mode", "色彩校正; 模拟硬件|保持亮度|减小对比度|关闭|校正曲线" },
-    { "sameboy_high_pass_filter_mode", "高通滤镜; 精确|移除DC偏移|关闭" },
-    { "sameboy_model", "模拟型号; 自动|Game Boy|Game Boy Color|Game Boy Advance|Super Game Boy|Super Game Boy 2" },
-    { "sameboy_border", "显示边框; 仅Super Game Boy|总是|从不" },
-    { "sameboy_rumble", "启用震动; 震动游戏|所有游戏|从不" },
+    { "sameboy_color_correction_mode", "色彩校正; emulate hardware|preserve brightness|reduce contrast|off|correct curves" },
+    { "sameboy_high_pass_filter_mode", "高通滤镜; accurate|remove dc offset|off" },
+    { "sameboy_model", "模拟型号(需重启); Auto|Game Boy|Game Boy Color|Game Boy Advance|Super Game Boy|Super Game Boy 2" },
+    { "sameboy_border", "显示边框; Super Game Boy only|always|never" },
+    { "sameboy_rumble", "启用震动; rumble-enabled games|all games|never" },
     { NULL }
 };
 
@@ -217,16 +234,16 @@ static const struct retro_variable vars_single[] = {
 static const struct retro_variable vars_dual[] = {
     { "sameboy_link", "联机线模拟; enabled|disabled" },
     /*{ "sameboy_ir",   "Infrared Sensor Emulation; disabled|enabled" },*/
-    { "sameboy_screen_layout", "屏幕布局; 上下|左右" },
+    { "sameboy_screen_layout", "屏幕布局; top-down|left-right" },
     { "sameboy_audio_output", "音频输出; Game Boy #1|Game Boy #2" },
-    { "sameboy_model_1", "Game Boy #1 模拟型号; 自动|Game Boy|Game Boy Color|Game Boy Advance" },
-    { "sameboy_model_2", "Game Boy #2 模拟型号; 自动|Game Boy|Game Boy Color|Game Boy Advance" },
-    { "sameboy_color_correction_mode_1", "Game Boy #1 色彩校正; 模拟硬件|保持亮度|减小对比度|关闭|校正曲线" },
-    { "sameboy_color_correction_mode_2", "Game Boy #2 色彩校正; 模拟硬件|保持亮度|减小对比度|关闭|校正曲线" },
-    { "sameboy_high_pass_filter_mode_1", "Game Boy #1 高通滤镜; 精确|移除DC偏移|关闭" },
-    { "sameboy_high_pass_filter_mode_2", "Game Boy #2 高通滤镜; 精确|移除DC偏移|关闭" },
-    { "sameboy_rumble_1", "Game Boy #1 启用震动; 震动游戏|所有游戏|从不" },
-    { "sameboy_rumble_2", "Game Boy #2 启用震动; 震动游戏|所有游戏|从不" },
+    { "sameboy_model_1", "Game Boy #1 模拟型号(需重启); Auto|Game Boy|Game Boy Color|Game Boy Advance" },
+    { "sameboy_model_2", "Game Boy #2 模拟型号(需重启); Auto|Game Boy|Game Boy Color|Game Boy Advance" },
+    { "sameboy_color_correction_mode_1", "Game Boy #1 色彩校正; emulate hardware|preserve brightness|reduce contrast|off|correct curves" },
+    { "sameboy_color_correction_mode_2", "Game Boy #2 色彩校正; emulate hardware|preserve brightness|reduce contrast|off|correct curves" },
+    { "sameboy_high_pass_filter_mode_1", "Game Boy #1 高通滤镜; accurate|remove dc offset|off" },
+    { "sameboy_high_pass_filter_mode_2", "Game Boy #2 高通滤镜; accurate|remove dc offset|off" },
+    { "sameboy_rumble_1", "Game Boy #1 启用震动; rumble-enabled games|all games|never" },
+    { "sameboy_rumble_2", "Game Boy #2 启用震动; rumble-enabled games|all games|never" },
     { NULL }
 };
 
@@ -259,70 +276,70 @@ static const struct retro_controller_description controllers_sgb[] = {
 };
 
 static struct retro_input_descriptor descriptors_1p[] = {
-    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "左" },
-    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "上" },
-    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "下" },
-    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "右" },
+    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "Left" },
+    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "Up" },
+    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "Down" },
+    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "Right" },
     { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B, "B" },
     { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A, "A" },
-    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT, "选择" },
-    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "开始" },
+    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT, "Select" },
+    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Start" },
     { 0 },
 };
 
 static struct retro_input_descriptor descriptors_2p[] = {
-    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "左" },
-    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "上" },
-    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "下" },
-    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "右" },
+    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "Left" },
+    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "Up" },
+    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "Down" },
+    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "Right" },
     { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B, "B" },
     { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A, "A" },
-    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT, "选择" },
-    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "开始" },
-    { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "左" },
-    { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "上" },
-    { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "下" },
-    { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "右" },
+    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT, "Select" },
+    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Start" },
+    { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "Left" },
+    { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "Up" },
+    { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "Down" },
+    { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "Right" },
     { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B, "B" },
     { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A, "A" },
-    { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT, "选择" },
-    { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "开始" },
+    { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT, "Select" },
+    { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Start" },
     { 0 },
 };
 
 static struct retro_input_descriptor descriptors_4p[] = {
-    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "左" },
-    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "上" },
-    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "下" },
-    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "右" },
+    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "Left" },
+    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "Up" },
+    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "Down" },
+    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "Right" },
     { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B, "B" },
     { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A, "A" },
-    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT, "选择" },
-    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "开始" },
-    { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "左" },
-    { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "上" },
-    { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "下" },
-    { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "右" },
+    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT, "Select" },
+    { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Start" },
+    { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "Left" },
+    { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "Up" },
+    { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "Down" },
+    { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "Right" },
     { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B, "B" },
     { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A, "A" },
-    { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT, "选择" },
-    { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "开始" },
-    { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "左" },
-    { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "上" },
-    { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "下" },
-    { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "右" },
+    { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT, "Select" },
+    { 1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Start" },
+    { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "Left" },
+    { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "Up" },
+    { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "Down" },
+    { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "Right" },
     { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B, "B" },
     { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A, "A" },
-    { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT, "选择" },
-    { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "开始" },
-    { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "左" },
-    { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "上" },
-    { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "下" },
-    { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "右" },
+    { 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT, "Select" },
+    { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Start" },
+    { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,  "Left" },
+    { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,    "Up" },
+    { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN,  "Down" },
+    { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "Right" },
     { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B, "B" },
     { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A, "A" },
-    { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT, "选择" },
-    { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "开始" },
+    { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT, "Select" },
+    { 3, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Start" },
     { 0 },
 };
 
@@ -533,19 +550,19 @@ static void check_variables()
         var.key = "sameboy_color_correction_mode";
         var.value = NULL;
         if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) { 
-            if (strcmp(var.value, "关闭") == 0) {
+            if (strcmp(var.value, "off") == 0) {
                 GB_set_color_correction_mode(&gameboy[0], GB_COLOR_CORRECTION_DISABLED);
             }
-            else if (strcmp(var.value, "校正曲线") == 0) {
+            else if (strcmp(var.value, "correct curves") == 0) {
                 GB_set_color_correction_mode(&gameboy[0], GB_COLOR_CORRECTION_CORRECT_CURVES);
             }
-            else if (strcmp(var.value, "模拟硬件") == 0) {
+            else if (strcmp(var.value, "emulate hardware") == 0) {
                 GB_set_color_correction_mode(&gameboy[0], GB_COLOR_CORRECTION_EMULATE_HARDWARE);
             }
-            else if (strcmp(var.value, "保持亮度") == 0) {
+            else if (strcmp(var.value, "preserve brightness") == 0) {
                 GB_set_color_correction_mode(&gameboy[0], GB_COLOR_CORRECTION_PRESERVE_BRIGHTNESS);
             }
-            else if (strcmp(var.value, "减小对比度") == 0) {
+            else if (strcmp(var.value, "reduce contrast") == 0) {
                 GB_set_color_correction_mode(&gameboy[0], GB_COLOR_CORRECTION_REDUCE_CONTRAST);
             }
         }
@@ -553,13 +570,13 @@ static void check_variables()
         var.key = "sameboy_rumble";
         var.value = NULL;
         if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
-            if (strcmp(var.value, "从不") == 0) {
+            if (strcmp(var.value, "never") == 0) {
                 GB_set_rumble_mode(&gameboy[0], GB_RUMBLE_DISABLED);
             }
-            else if (strcmp(var.value, "震动游戏") == 0) {
+            else if (strcmp(var.value, "rumble-enabled games") == 0) {
                 GB_set_rumble_mode(&gameboy[0], GB_RUMBLE_CARTRIDGE_ONLY);
             }
-            else if (strcmp(var.value, "所有游戏") == 0) {
+            else if (strcmp(var.value, "all games") == 0) {
                 GB_set_rumble_mode(&gameboy[0], GB_RUMBLE_ALL_GAMES);
             }
         }
@@ -567,13 +584,13 @@ static void check_variables()
         var.key = "sameboy_high_pass_filter_mode";
         var.value = NULL;
         if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) { 
-            if (strcmp(var.value, "关闭") == 0) {
+            if (strcmp(var.value, "off") == 0) {
                 GB_set_highpass_filter_mode(&gameboy[0], GB_HIGHPASS_OFF);
             }
-            else if (strcmp(var.value, "精确") == 0) {
+            else if (strcmp(var.value, "accurate") == 0) {
                 GB_set_highpass_filter_mode(&gameboy[0], GB_HIGHPASS_ACCURATE);
             }
-            else if (strcmp(var.value, "移除DC偏移") == 0) {
+            else if (strcmp(var.value, "remove dc offset") == 0) {
                 GB_set_highpass_filter_mode(&gameboy[0], GB_HIGHPASS_REMOVE_DC_OFFSET);
             }
         }
@@ -601,23 +618,19 @@ static void check_variables()
                 new_model = MODEL_AUTO;
             }
 
-            if (new_model != model[0]) { 
-                geometry_updated = true;
-                model[0] = new_model;
-                init_for_current_model(0);
-            }
+            model[0] = new_model;
         }
 
         var.key = "sameboy_border";
         var.value = NULL;
         if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
-            if (strcmp(var.value, "从不") == 0) {
+            if (strcmp(var.value, "never") == 0) {
                 GB_set_border_mode(&gameboy[0], GB_BORDER_NEVER);
             }
-            else if (strcmp(var.value, "仅Super Game Boy") == 0) {
+            else if (strcmp(var.value, "Super Game Boy only") == 0) {
                 GB_set_border_mode(&gameboy[0], GB_BORDER_SGB);
             }
-            else if (strcmp(var.value, "总是") == 0) {
+            else if (strcmp(var.value, "always") == 0) {
                 GB_set_border_mode(&gameboy[0], GB_BORDER_ALWAYS);
             }
             
@@ -630,19 +643,19 @@ static void check_variables()
         var.key = "sameboy_color_correction_mode_1";
         var.value = NULL;
         if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) { 
-            if (strcmp(var.value, "关闭") == 0) {
+            if (strcmp(var.value, "off") == 0) {
                 GB_set_color_correction_mode(&gameboy[0], GB_COLOR_CORRECTION_DISABLED);
             }
-            else if (strcmp(var.value, "校正曲线") == 0) {
+            else if (strcmp(var.value, "correct curves") == 0) {
                 GB_set_color_correction_mode(&gameboy[0], GB_COLOR_CORRECTION_CORRECT_CURVES);
             }
-            else if (strcmp(var.value, "模拟硬件") == 0) {
+            else if (strcmp(var.value, "emulate hardware") == 0) {
                 GB_set_color_correction_mode(&gameboy[0], GB_COLOR_CORRECTION_EMULATE_HARDWARE);
             }
-            else if (strcmp(var.value, "保持亮度") == 0) {
+            else if (strcmp(var.value, "preserve brightness") == 0) {
                 GB_set_color_correction_mode(&gameboy[0], GB_COLOR_CORRECTION_PRESERVE_BRIGHTNESS);
             }
-            else if (strcmp(var.value, "减小对比度") == 0) {
+            else if (strcmp(var.value, "reduce contrast") == 0) {
                 GB_set_color_correction_mode(&gameboy[0], GB_COLOR_CORRECTION_REDUCE_CONTRAST);
             }
         }
@@ -650,19 +663,19 @@ static void check_variables()
         var.key = "sameboy_color_correction_mode_2";
         var.value = NULL;
         if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) { 
-            if (strcmp(var.value, "关闭") == 0) {
+            if (strcmp(var.value, "off") == 0) {
                 GB_set_color_correction_mode(&gameboy[1], GB_COLOR_CORRECTION_DISABLED);
             }
-            else if (strcmp(var.value, "校正曲线") == 0) {
+            else if (strcmp(var.value, "correct curves") == 0) {
                 GB_set_color_correction_mode(&gameboy[1], GB_COLOR_CORRECTION_CORRECT_CURVES);
             }
-            else if (strcmp(var.value, "模拟硬件") == 0) {
+            else if (strcmp(var.value, "emulate hardware") == 0) {
                 GB_set_color_correction_mode(&gameboy[1], GB_COLOR_CORRECTION_EMULATE_HARDWARE);
             }
-            else if (strcmp(var.value, "保持亮度") == 0) {
+            else if (strcmp(var.value, "preserve brightness") == 0) {
                 GB_set_color_correction_mode(&gameboy[1], GB_COLOR_CORRECTION_PRESERVE_BRIGHTNESS);
             }
-            else if (strcmp(var.value, "减小对比度") == 0) {
+            else if (strcmp(var.value, "reduce contrast") == 0) {
                 GB_set_color_correction_mode(&gameboy[1], GB_COLOR_CORRECTION_REDUCE_CONTRAST);
             }
 
@@ -671,13 +684,13 @@ static void check_variables()
         var.key = "sameboy_rumble_1";
         var.value = NULL;
         if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
-            if (strcmp(var.value, "从不") == 0) {
+            if (strcmp(var.value, "never") == 0) {
                 GB_set_rumble_mode(&gameboy[0], GB_RUMBLE_DISABLED);
             }
-            else if (strcmp(var.value, "震动游戏") == 0) {
+            else if (strcmp(var.value, "rumble-enabled games") == 0) {
                 GB_set_rumble_mode(&gameboy[0], GB_RUMBLE_CARTRIDGE_ONLY);
             }
-            else if (strcmp(var.value, "所有游戏") == 0) {
+            else if (strcmp(var.value, "all games") == 0) {
                 GB_set_rumble_mode(&gameboy[0], GB_RUMBLE_ALL_GAMES);
             }
         }
@@ -685,13 +698,13 @@ static void check_variables()
         var.key = "sameboy_rumble_2";
         var.value = NULL;
         if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
-            if (strcmp(var.value, "从不") == 0) {
+            if (strcmp(var.value, "never") == 0) {
                 GB_set_rumble_mode(&gameboy[1], GB_RUMBLE_DISABLED);
             }
-            else if (strcmp(var.value, "震动游戏") == 0) {
+            else if (strcmp(var.value, "rumble-enabled games") == 0) {
                 GB_set_rumble_mode(&gameboy[1], GB_RUMBLE_CARTRIDGE_ONLY);
             }
-            else if (strcmp(var.value, "所有游戏") == 0) {
+            else if (strcmp(var.value, "all games") == 0) {
                 GB_set_rumble_mode(&gameboy[1], GB_RUMBLE_ALL_GAMES);
             }
         }
@@ -699,13 +712,13 @@ static void check_variables()
         var.key = "sameboy_high_pass_filter_mode_1";
         var.value = NULL;
         if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) { 
-            if (strcmp(var.value, "关闭") == 0) {
+            if (strcmp(var.value, "off") == 0) {
                 GB_set_highpass_filter_mode(&gameboy[0], GB_HIGHPASS_OFF);
             }
-            else if (strcmp(var.value, "精确") == 0) {
+            else if (strcmp(var.value, "accurate") == 0) {
                 GB_set_highpass_filter_mode(&gameboy[0], GB_HIGHPASS_ACCURATE);
             }
-            else if (strcmp(var.value, "移除DC偏移") == 0) {
+            else if (strcmp(var.value, "remove dc offset") == 0) {
                 GB_set_highpass_filter_mode(&gameboy[0], GB_HIGHPASS_REMOVE_DC_OFFSET);
             }
         }
@@ -713,13 +726,13 @@ static void check_variables()
         var.key = "sameboy_high_pass_filter_mode_2";
         var.value = NULL;
         if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) { 
-            if (strcmp(var.value, "关闭") == 0) {
+            if (strcmp(var.value, "off") == 0) {
                 GB_set_highpass_filter_mode(&gameboy[1], GB_HIGHPASS_OFF);
             }
-            else if (strcmp(var.value, "精确") == 0) {
+            else if (strcmp(var.value, "accurate") == 0) {
                 GB_set_highpass_filter_mode(&gameboy[1], GB_HIGHPASS_ACCURATE);
             }
-            else if (strcmp(var.value, "移除DC偏移") == 0) {
+            else if (strcmp(var.value, "remove dc offset") == 0) {
                 GB_set_highpass_filter_mode(&gameboy[1], GB_HIGHPASS_REMOVE_DC_OFFSET);
             }
         }
@@ -747,10 +760,7 @@ static void check_variables()
                 new_model = MODEL_AUTO;
             }
 
-            if (model[0] != new_model) { 
-                model[0] = new_model;
-                init_for_current_model(0);
-            }
+            model[0] = new_model;
         }
 
         var.key = "sameboy_model_2";
@@ -776,16 +786,13 @@ static void check_variables()
                 new_model = MODEL_AUTO;
             }
 
-            if (model[1] != new_model) { 
-                model[1] = new_model;
-                init_for_current_model(1);
-            }
+            model[1] = new_model;
         }
 
         var.key = "sameboy_screen_layout";
         var.value = NULL;
         if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) { 
-            if (strcmp(var.value, "上下") == 0) {
+            if (strcmp(var.value, "top-down") == 0) {
                 screen_layout = LAYOUT_TOP_DOWN;
             }
             else {
@@ -850,6 +857,10 @@ void retro_init(void)
     else {
         log_cb = fallback_log;
     }
+
+    if (environ_cb(RETRO_ENVIRONMENT_GET_INPUT_BITMASKS, NULL)) {
+        libretro_supports_bitmasks = true;
+    }
 }
 
 void retro_deinit(void)
@@ -858,6 +869,8 @@ void retro_deinit(void)
     free(frame_buf_copy);
     frame_buf = NULL;
     frame_buf_copy = NULL;
+
+    libretro_supports_bitmasks = false;
 }
 
 unsigned retro_api_version(void)
@@ -947,10 +960,14 @@ void retro_set_video_refresh(retro_video_refresh_t cb)
 
 void retro_reset(void)
 {
+    check_variables();
+
     for (int i = 0; i < emulated_devices; i++) {
+        init_for_current_model(i);
         GB_reset(&gameboy[i]);
     }
 
+    geometry_updated = true;
 }
 
 void retro_run(void)
