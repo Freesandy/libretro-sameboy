@@ -222,28 +222,28 @@ static retro_environment_t environ_cb;
 
 /* variables for single cart mode */
 static const struct retro_variable vars_single[] = {
-    { "sameboy_color_correction_mode", "Color correction; emulate hardware|preserve brightness|reduce contrast|off|correct curves" },
-    { "sameboy_high_pass_filter_mode", "High-pass filter; accurate|remove dc offset|off" },
-    { "sameboy_model", "Emulated model (Restart game); Auto|Game Boy|Game Boy Color|Game Boy Advance|Super Game Boy|Super Game Boy 2" },
-    { "sameboy_border", "Display border; Super Game Boy only|always|never" },
-    { "sameboy_rumble", "Enable rumble; rumble-enabled games|all games|never" },
+    { "sameboy_color_correction_mode", "色彩校正; emulate hardware|preserve brightness|reduce contrast|off|correct curves" },
+    { "sameboy_high_pass_filter_mode", "高通滤镜; accurate|remove dc offset|off" },
+    { "sameboy_model", "模拟型号(需重启); Auto|Game Boy|Game Boy Color|Game Boy Advance|Super Game Boy|Super Game Boy 2" },
+    { "sameboy_border", "显示边框; Super Game Boy only|always|never" },
+    { "sameboy_rumble", "启用震动; rumble-enabled games|all games|never" },
     { NULL }
 };
 
 /* variables for dual cart dual gameboy mode */
 static const struct retro_variable vars_dual[] = {
-    { "sameboy_link", "Link cable emulation; enabled|disabled" },
+    { "sameboy_link", "联机线模拟; enabled|disabled" },
     /*{ "sameboy_ir",   "Infrared Sensor Emulation; disabled|enabled" },*/
-    { "sameboy_screen_layout", "Screen layout; top-down|left-right" },
-    { "sameboy_audio_output", "Audio output; Game Boy #1|Game Boy #2" },
-    { "sameboy_model_1", "Emulated model for Game Boy #1 (Restart game); Auto|Game Boy|Game Boy Color|Game Boy Advance" },
-    { "sameboy_model_2", "Emulated model for Game Boy #2 (Restart game); Auto|Game Boy|Game Boy Color|Game Boy Advance" },
-    { "sameboy_color_correction_mode_1", "Color correction for Game Boy #1; emulate hardware|preserve brightness|reduce contrast|off|correct curves" },
-    { "sameboy_color_correction_mode_2", "Color correction for Game Boy #2; emulate hardware|preserve brightness|reduce contrast|off|correct curves" },
-    { "sameboy_high_pass_filter_mode_1", "High-pass filter for Game Boy #1; accurate|remove dc offset|off" },
-    { "sameboy_high_pass_filter_mode_2", "High-pass filter for Game Boy #2; accurate|remove dc offset|off" },
-    { "sameboy_rumble_1", "Enable rumble for Game Boy #1; rumble-enabled games|all games|never" },
-    { "sameboy_rumble_2", "Enable rumble for Game Boy #2; rumble-enabled games|all games|never" },
+    { "sameboy_screen_layout", "屏幕布局; top-down|left-right" },
+    { "sameboy_audio_output", "音频输出; Game Boy #1|Game Boy #2" },
+    { "sameboy_model_1", "Game Boy #1 模拟型号(需重启); Auto|Game Boy|Game Boy Color|Game Boy Advance" },
+    { "sameboy_model_2", "Game Boy #2 模拟型号(需重启); Auto|Game Boy|Game Boy Color|Game Boy Advance" },
+    { "sameboy_color_correction_mode_1", "Game Boy #1 色彩校正; emulate hardware|preserve brightness|reduce contrast|off|correct curves" },
+    { "sameboy_color_correction_mode_2", "Game Boy #2 色彩校正; emulate hardware|preserve brightness|reduce contrast|off|correct curves" },
+    { "sameboy_high_pass_filter_mode_1", "Game Boy #1 高通滤镜; accurate|remove dc offset|off" },
+    { "sameboy_high_pass_filter_mode_2", "Game Boy #2 高通滤镜; accurate|remove dc offset|off" },
+    { "sameboy_rumble_1", "Game Boy #1 启用震动; rumble-enabled games|all games|never" },
+    { "sameboy_rumble_2", "Game Boy #2 启用震动; rumble-enabled games|all games|never" },
     { NULL }
 };
 
